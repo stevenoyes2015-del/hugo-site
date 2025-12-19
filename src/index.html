@@ -1,17 +1,58 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="styles.css">
-  <title>Dieter's New Website</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prof. Jane Doe — Home</title>
+  <link rel="stylesheet" href="css/professor.css" />
 </head>
-
 <body>
-  <main>
-    <h1>Dieter's New Website</h1>
-  </main>
-</body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="index.html">Jane A. Doe, Ph.D.</a>
+      <nav class="nav">
+        <a href="index.html">Home</a>
+        <a href="about.html">About</a>
+        <a href="research.html">Research</a>
+        <a href="publications.html">Publications</a>
+        <a href="contact.html">Contact</a>
+      </nav>
+    </div>
+  </header>
 
+  <main class="wrap">
+    <section class="hero">
+      <h1>Jane A. Doe</h1>
+      <p class="subtitle">Professor of Computer Science — Machine Learning & HCI</p>
+      <p class="lead">My research focuses on explainable machine learning, human-centered AI and interactive systems. I teach undergraduate and graduate courses in algorithms, ML and HCI.</p>
+      <p><a class="btn" href="research.html">See Research</a> <a class="btn ghost" href="publications.html">Publications</a></p>
+    </section>
+
+    <section class="cards">
+      <article>
+        <h2>Latest</h2>
+        <ul>
+          <li><strong>2025-11-01:</strong> New paper on Explainable Models.</li>
+          <li><strong>2025-09-10:</strong> Fall courses published.</li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>Teaching</h2>
+        <ul>
+          <li>CS 101 — Intro to Programming</li>
+          <li>CS 523 — Machine Learning</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <small>© 2025 Jane A. Doe — Example University</small>
+    </div>
+  </footer>
+
+  <script src="js/professor.js"></script>
+</body>
 </html>
