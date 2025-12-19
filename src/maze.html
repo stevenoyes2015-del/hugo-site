@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simple Maze Generator & Solver</title>
+  <style>
+    :root{
+      --accent: #2a6fdb;
+      --bg: #111;
+      --cell: #ffffff;
+      --visited: #90caf9;
+      --path: #ffd54f;
+      --wall: #111;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    body { margin:0; background:#f7f8fb; color:#222; }
+    .wrap { max-width:1100px; margin:18px auto; padding:16px; }
+    header{display:flex;justify-content:space-between;align-items:center}
+    h1{font-size:1.1rem;margin:0}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+    .controls > * { padding:8px;border-radius:6px;background:#fff;border:1px solid #e6e6e6 }
+    .controls label{margin-right:6px;font-size:0.9rem;color:#555}
+    button{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button.secondary{background:#666}
+    select,input{font:inherit}
+    .canvas-wrap{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;display:inline-block}
+    canvas{display:block;background:var(--wall);border-radius:4px}
+    .meta{color:#666;font-size:0.9rem;margin-top:8px}
+    .legend{margin-left:8px;font-size:0.9rem;color:#444}
+    .legend span{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:middle;border-radius:2px}
+    @media (max-width:680px){ .controls{flex-direction:column;align-items:stretch} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Maze Generator & Solver</h1>
+        <div class="meta">Generate a random perfect maze (recursive backtracker). Solve with BFS or DFS. Click cell to set Start (left click) or End (right click).</div>
+      </div>
+      <div style="text-align:right">
+        <div class="legend">
+          <span style="background:#fff;border:1px solid #ccc"></span> empty
+          <span style="background:var(--visited);margin-left:10px"></span> visited
+          <span style="background:var(--path);margin-left:10px"></span> solution
+        </div>
+      </div>
+    </header>
+
+    <div class="controls" aria-hidden="false" style="margin-top:12px;">
+      <div>
+        <label>Cols</label>
+        <input id="cols" type="number" min="5" max="100" value="40" style="width:72px" />
+        <label style="margin-left:8px">Rows</label>
+        <input id="rows" type="number" min="5" max="100" value="25" style="width:72px" />
+        <button id="resize" class="secondary">Resize</button>
+      </div>
+
+      <div>
+        <label>Cell</label>
+        <input id="cellSize" type="range" min="6" max="30" value="16" />
+        <span id="cellSizeVal">16px</span>
+      </div>
+
+      <div>
+        <label>Algorithm</label>
+        <select id="algo">
+          <option value="BFS">BFS (shortest)</option>
+          <option value="DFS">DFS (depth-first)</option>
+        </select>
+      </div>
+
+      <div>
+        <button id="gen">Generate</button>
+        <button id="solve" class="secondary">Solve</button>
+        <button id="pause" class="secondary" disabled>Pause</button>
+        <button id="clear" class="secondary">Clear</button>
+      </div>
+
+      <div>
+        <label>Solver speed</label>
+        <input id="speed" type="range" min="10" max="500" value="40" />
+        <span id="speedVal">40ms</span>
+      </div>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="maze" tabindex="0" aria-label="Maze canvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // UI elements
+    const canvas = document.getElementById('maze');
+    const ctx = canvas.getContext('2d');
+    const genBtn = document.getElementById('gen');
+    const solveBtn = document.getElementById('solve');
+    const pauseBtn = document.getElementById('pause');
+    const clearBtn = document.getElementById('clear');
+    const colsInput = document.getElementById('cols');
+    const rowsInput = document.getElementById('rows');
+    const resizeBtn = document.getElementById('resize');
+    const cellSizeInput = document.getElementById('cellSize');
+    const cellSizeVal = document.getElementById('cellSizeVal');
+    const speedInput = document.getElementById('speed');
+    const speedVal = document.getElementById('speedVal');
+    const algoSelect = document.getElementById('algo');
+
+    // Maze state
+    let cols = clamp(parseInt(colsInput.value, 10), 5, 100);
+    let rows = clamp(parseInt(rowsInput.value, 10), 5, 100);
+    let cellSize = parseInt(cellSizeInput.value, 10);
+    let grid = []; // array of cells {x,y,walls:[top,right,bottom,left],visited}
+    // start/end and whether user explicitly set them
+    let start = {x:0,y:0};
+    let end = {x: cols-1, y: rows-1};
+    let startSet = false;
+    let endSet = false;
+
+    let solving = false;
+    let paused = false;
+
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+    function resizeCanvas() {
+      canvas.width = cols * cellSize;
+      canvas.height = rows * cellSize;
+      draw();
+    }
+
+    function makeCells(r, c) {
+      const arr = new Array(r);
+      for (let y = 0; y < r; y++) {
+        arr[y] = new Array(c);
+        for (let x = 0; x < c; x++) {
+          arr[y][x] = { x, y, walls: [1,1,1,1], visited: false }; // top,right,bottom,left
+        }
+      }
+      return arr;
+    }
+
+    // Helper: get neighbor coordinates and direction index
+    function neighbors(cell) {
+      const n = [];
+      const {x, y} = cell;
+      if (y > 0) n.push({cell:grid[y-1][x], dir:0, opp:2});
+      if (x < cols-1) n.push({cell:grid[y][x+1], dir:1, opp:3});
+      if (y < rows-1) n.push({cell:grid[y+1][x], dir:2, opp:0});
+      if (x > 0) n.push({cell:grid[y][x-1], dir:3, opp:1});
+      return n;
+    }
+
+    // Maze generation: iterative recursive backtracker
+    function generateMaze() {
+      // ensure inputs are clamped (limit 100x100)
+      cols = clamp(parseInt(colsInput.value, 10) || cols, 5, 100);
+      rows = clamp(parseInt(rowsInput.value, 10) || rows, 5, 100);
+      colsInput.value = cols;
+      rowsInput.value = rows;
+
+      // reset paused/solving state
+      solving = false;
+      paused = false;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+
+      grid = makeCells(rows, cols);
+      const stack = [];
+      const startCell = grid[0][0];
+      startCell.visited = true;
+      stack.push(startCell);
+
+      while (stack.length) {
+        const current = stack[stack.length - 1];
+        // find unvisited neighbors
+        const nbs = neighbors(current).filter(n => !n.cell.visited);
+        if (nbs.length === 0) {
+          stack.pop();
+          continue;
+        }
+        // choose random neighbor
+        const pick = nbs[Math.floor(Math.random() * nbs.length)];
+        // remove walls
+        current.walls[pick.dir] = 0;
+        pick.cell.walls[pick.opp] = 0;
+        pick.cell.visited = true;
+        stack.push(pick.cell);
+      }
+
+      // mark all visited false for solver visualization
+      for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) grid[y][x].visited = false;
+
+      // set default start/end only when user hasn't set them
+      if (!startSet) start = {x:0,y:0};
+      if (!endSet) end = {x:cols-1,y:rows-1};
+
+      // clamp start/end in case user-specified coordinates are out of new bounds
+      clampStartEnd();
+
+      resizeCanvas();
+      draw();
+    }
+
+    function clampStartEnd() {
+      start.x = clamp(start.x, 0, cols-1);
+      start.y = clamp(start.y, 0, rows-1);
+      end.x = clamp(end.x, 0, cols-1);
+      end.y = clamp(end.y, 0, rows-1);
+    }
+
+    // Draw grid with walls
+    function draw(visitedMap, pathMap) {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // draw cells background
+      for (let y=0;y<rows;y++) {
+        for (let x=0;x<cols;x++) {
+          const cx = x * cellSize;
+          const cy = y * cellSize;
+          // visited
+          if (visitedMap && visitedMap[y] && visitedMap[y][x]) {
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--visited') || '#90caf9';
+            ctx.fillRect(cx, cy, cellSize, cellSize);
+          } else {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(cx, cy, cellSize, cellSize);
+          }
+
+          // path highlight
+          if (pathMap && pathMap[y] && pathMap[y][x]) {
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--path') || '#ffd54f';
+            ctx.fillRect(cx+2, cy+2, cellSize-4, cellSize-4);
+          }
+        }
+      }
+
+      // walls
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 2;
+      for (let y=0;y<rows;y++) {
+        for (let x=0;x<cols;x++) {
+          const cell = grid[y][x];
+          const cx = x * cellSize;
+          const cy = y * cellSize;
+          // top
+          if (cell.walls[0]) {
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + cellSize, cy);
+            ctx.stroke();
+          }
+          // right
+          if (cell.walls[1]) {
+            ctx.beginPath();
+            ctx.moveTo(cx + cellSize, cy);
+            ctx.lineTo(cx + cellSize, cy + cellSize);
+            ctx.stroke();
+          }
+          // bottom
+          if (cell.walls[2]) {
+            ctx.beginPath();
+            ctx.moveTo(cx + cellSize, cy + cellSize);
+            ctx.lineTo(cx, cy + cellSize);
+            ctx.stroke();
+          }
+          // left
+          if (cell.walls[3]) {
+            ctx.beginPath();
+            ctx.moveTo(cx, cy + cellSize);
+            ctx.lineTo(cx, cy);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // draw start/end
+      function drawMarker(pos, color, label) {
+        ctx.fillStyle = color;
+        const cx = pos.x * cellSize;
+        const cy = pos.y * cellSize;
+        ctx.fillRect(cx+3, cy+3, cellSize-6, cellSize-6);
+        ctx.fillStyle = '#000';
+        ctx.font = `${Math.max(8, cellSize/2)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, cx + cellSize/2, cy + cellSize/2);
+      }
+      drawMarker(start, '#7cb342', 'S');
+      drawMarker(end, '#e53935', 'E');
+    }
+
+    // Solve wrapper chooses algorithm
+    async function solveMaze() {
+      if (solving) return;
+      const algo = (algoSelect.value || 'BFS').toUpperCase();
+      if (algo === 'DFS') {
+        await dfsSolve();
+      } else {
+        await bfsSolve();
+      }
+    }
+
+    // BFS solver (shortest path)
+    async function bfsSolve() {
+      if (solving) return;
+      solving = true;
+      paused = false;
+      pauseBtn.disabled = false;
+      pauseBtn.textContent = 'Pause';
+
+      const queue = [];
+      const visited = Array.from({length:rows}, () => new Array(cols).fill(false));
+      const prev = Array.from({length:rows}, () => new Array(cols).fill(null));
+      queue.push(start);
+      visited[start.y][start.x] = true;
+
+      let found = false;
+      while (queue.length && !found && solving) {
+        // support pause
+        while (paused && solving) {
+          await sleep(80);
+        }
+        if (!solving) break;
+
+        const cur = queue.shift();
+        visited[cur.y][cur.x] = true;
+        draw(visited, null);
+
+        // read speed each iteration so slider adjusts live
+        await sleep(parseInt(speedInput.value, 10) || 40);
+
+        if (cur.x === end.x && cur.y === end.y) { found = true; break; }
+
+        const cell = grid[cur.y][cur.x];
+        // top
+        if (!cell.walls[0] && cur.y > 0 && !visited[cur.y-1][cur.x]) {
+          visited[cur.y-1][cur.x] = true; prev[cur.y-1][cur.x] = cur; queue.push({x:cur.x, y:cur.y-1});
+        }
+        // right
+        if (!cell.walls[1] && cur.x < cols-1 && !visited[cur.y][cur.x+1]) {
+          visited[cur.y][cur.x+1] = true; prev[cur.y][cur.x+1] = cur; queue.push({x:cur.x+1, y:cur.y});
+        }
+        // bottom
+        if (!cell.walls[2] && cur.y < rows-1 && !visited[cur.y+1][cur.x]) {
+          visited[cur.y+1][cur.x] = true; prev[cur.y+1][cur.x] = cur; queue.push({x:cur.x, y:cur.y+1});
+        }
+        // left
+        if (!cell.walls[3] && cur.x > 0 && !visited[cur.y][cur.x-1]) {
+          visited[cur.y][cur.x-1] = true; prev[cur.y][cur.x-1] = cur; queue.push({x:cur.x-1, y:cur.y});
+        }
+      }
+
+      if (!found) {
+        draw(visited, null);
+        solving = false;
+        paused = false;
+        pauseBtn.disabled = true;
+        pauseBtn.textContent = 'Pause';
+        alert('No path found.');
+        return;
+      }
+
+      // reconstruct path
+      const path = Array.from({length:rows}, () => new Array(cols).fill(false));
+      let at = end;
+      while (at) {
+        path[at.y][at.x] = true;
+        at = prev[at.y][at.x];
+      }
+
+      draw(visited, path);
+      solving = false;
+      paused = false;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+    }
+
+    // DFS solver (depth-first)
+    async function dfsSolve() {
+      if (solving) return;
+      solving = true;
+      paused = false;
+      pauseBtn.disabled = false;
+      pauseBtn.textContent = 'Pause';
+
+      const stack = [];
+      const visited = Array.from({length:rows}, () => new Array(cols).fill(false));
+      const prev = Array.from({length:rows}, () => new Array(cols).fill(null));
+      stack.push(start);
+      visited[start.y][start.x] = true;
+
+      let found = false;
+      while (stack.length && !found && solving) {
+        while (paused && solving) {
+          await sleep(80);
+        }
+        if (!solving) break;
+
+        const cur = stack.pop();
+        visited[cur.y][cur.x] = true;
+        draw(visited, null);
+
+        await sleep(parseInt(speedInput.value, 10) || 40);
+
+        if (cur.x === end.x && cur.y === end.y) { found = true; break; }
+
+        const cell = grid[cur.y][cur.x];
+        // order: left, bottom, right, top (controls exploration pattern)
+        const pushIf = (nx, ny) => {
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) return;
+          if (visited[ny][nx]) return;
+          visited[ny][nx] = true;
+          prev[ny][nx] = cur;
+          stack.push({x:nx, y:ny});
+        };
+        if (!cell.walls[3]) pushIf(cur.x-1, cur.y); // left
+        if (!cell.walls[2]) pushIf(cur.x, cur.y+1); // bottom
+        if (!cell.walls[1]) pushIf(cur.x+1, cur.y); // right
+        if (!cell.walls[0]) pushIf(cur.x, cur.y-1); // top
+      }
+
+      if (!found) {
+        draw(visited, null);
+        solving = false;
+        paused = false;
+        pauseBtn.disabled = true;
+        pauseBtn.textContent = 'Pause';
+        alert('No path found.');
+        return;
+      }
+
+      // reconstruct path
+      const path = Array.from({length:rows}, () => new Array(cols).fill(false));
+      let at = end;
+      while (at) {
+        path[at.y][at.x] = true;
+        at = prev[at.y][at.x];
+      }
+
+      draw(visited, path);
+      solving = false;
+      paused = false;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function clearMaze() {
+      solving = false;
+      paused = false;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+      // clearing resets user-set flags so new defaults will apply
+      startSet = false;
+      endSet = false;
+      grid = makeCells(rows, cols);
+      start = {x:0,y:0};
+      end = {x:cols-1,y:rows-1};
+      draw();
+    }
+
+    // Mouse interactions: left click sets start, right click sets end, shift-click toggle walls
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('mousedown', function (ev) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = ev.clientX - rect.left;
+      const my = ev.clientY - rect.top;
+      const x = Math.floor(mx / cellSize);
+      const y = Math.floor(my / cellSize);
+      if (x < 0 || x >= cols || y < 0 || y >= rows) return;
+      if (ev.button === 0 && !ev.shiftKey) { // left: set start
+        start = {x,y};
+        startSet = true;
+        clampStartEnd();
+        draw();
+      } else if (ev.button === 2 && !ev.shiftKey) { // right: set end
+        end = {x,y};
+        endSet = true;
+        clampStartEnd();
+        draw();
+      } else if (ev.shiftKey) {
+        // shift + click toggles walls between clicked cell and nearest neighbor
+        const cx = x*cellSize, cy = y*cellSize;
+        const rx = (mx - cx) - cellSize/2;
+        const ry = (my - cy) - cellSize/2;
+        const cell = grid[y][x];
+        if (Math.abs(rx) > Math.abs(ry)) {
+          // horizontal preference
+          if (rx > 0 && x < cols-1) {
+            // toggle right wall
+            cell.walls[1] = cell.walls[1] ? 0 : 1;
+            grid[y][x+1].walls[3] = cell.walls[1] ? 1 : 0;
+          } else if (x > 0) {
+            cell.walls[3] = cell.walls[3] ? 0 : 1;
+            grid[y][x-1].walls[1] = cell.walls[3] ? 1 : 0;
+          }
+        } else {
+          // vertical preference
+          if (ry > 0 && y < rows-1) {
+            cell.walls[2] = cell.walls[2] ? 0 : 1;
+            grid[y+1][x].walls[0] = cell.walls[2] ? 1 : 0;
+          } else if (y > 0) {
+            cell.walls[0] = cell.walls[0] ? 0 : 1;
+            grid[y-1][x].walls[2] = cell.walls[0] ? 1 : 0;
+          }
+        }
+        draw();
+      }
+    });
+
+    // Controls wiring
+    genBtn.addEventListener('click', () => { generateMaze(); });
+    solveBtn.addEventListener('click', () => { if (!solving) solveMaze(); });
+    pauseBtn.addEventListener('click', () => {
+      if (!solving) return;
+      paused = !paused;
+      pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    });
+    clearBtn.addEventListener('click', () => { solving=false; paused=false; clearMaze(); });
+    resizeBtn.addEventListener('click', () => {
+      cols = clamp(parseInt(colsInput.value,10) || cols, 5, 100);
+      rows = clamp(parseInt(rowsInput.value,10) || rows, 5, 100);
+      colsInput.value = cols;
+      rowsInput.value = rows;
+      // When resizing keep user-set start/end where possible; clamp to new bounds.
+      grid = makeCells(rows, cols);
+      clampStartEnd();
+      solving = false;
+      paused = false;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+      resizeCanvas();
+    });
+    cellSizeInput.addEventListener('input', (e) => {
+      cellSize = parseInt(e.target.value,10);
+      cellSizeVal.textContent = cellSize + 'px';
+      resizeCanvas();
+    });
+    speedInput.addEventListener('input', (e) => { speedVal.textContent = e.target.value + 'ms'; });
+
+    // init
+    cellSizeVal.textContent = cellSize + 'px';
+    speedVal.textContent = speedInput.value + 'ms';
+    grid = makeCells(rows, cols);
+    resizeCanvas();
+    generateMaze();
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e => {
+      if (e.key === 'g' || e.key === 'G') generateMaze();
+      if (e.key === 's' || e.key === 'S') { if (!solving) solveMaze(); }
+      if (e.key === 'c' || e.key === 'C') { solving=false; paused=false; clearMaze(); }
+      if (e.key === 'p' || e.key === 'P') { // allow keyboard pause
+        if (solving) { paused = !paused; pauseBtn.textContent = paused ? 'Resume' : 'Pause'; }
+      }
+    });
+
+  })();
+  </script>
+</body>
+</html>
