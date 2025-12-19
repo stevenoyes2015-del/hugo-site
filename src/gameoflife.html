@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Conway's Game of Life — Simulator</title>
+  <style>
+    :root{
+      --accent:#2a6fdb;
+      --muted:#666;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    body{margin:0;background:#fafafa;color:#111}
+    .wrap{max-width:1100px;margin:20px auto;padding:16px}
+    header{display:flex;align-items:center;justify-content:space-between}
+    h1{font-size:1.25rem;margin:0 0 8px 0}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .controls > *{background:#fff;border:1px solid #e6e6e6;padding:8px;border-radius:6px}
+    .controls label{font-size:0.85rem;color:var(--muted);margin-right:6px}
+    button{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button.secondary{background:#666}
+    .toolbar-row{display:flex;gap:8px;align-items:center}
+    .canvas-wrap{background:#fff;padding:12px;border-radius:8px;border:1px solid #eee;display:inline-block}
+    canvas{display:block;background:#0f1720;border-radius:4px}
+    .meta{margin-top:10px;color:var(--muted);font-size:0.9rem}
+    @media (max-width:640px){
+      .controls{flex-direction:column;align-items:stretch}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Conway's Game of Life — Simulator</h1>
+        <div class="meta">Click cells to toggle. Use controls to run, step, randomize, or clear.</div>
+      </div>
+      <div style="text-align:right;color:var(--muted);font-size:0.85rem">Keyboard: Space=start/stop • R=randomize • C=clear</div>
+    </header>
+
+    <div class="controls" style="margin-top:12px;">
+      <div class="toolbar-row">
+        <button id="startBtn">Start</button>
+        <button id="stepBtn" class="secondary">Step</button>
+        <button id="clearBtn" class="secondary">Clear</button>
+        <button id="randomBtn" class="secondary">Random</button>
+      </div>
+
+      <div class="toolbar-row">
+        <label>Speed</label>
+        <input id="speed" type="range" min="50" max="1000" step="10" value="200" />
+        <span id="speedVal">200ms</span>
+      </div>
+
+      <div class="toolbar-row">
+        <label>Cell size</label>
+        <input id="cellSize" type="range" min="6" max="24" step="1" value="12" />
+        <span id="cellSizeVal">12px</span>
+      </div>
+
+      <div class="toolbar-row">
+        <label>Wrap</label>
+        <input id="wrap" type="checkbox" checked />
+      </div>
+
+      <div class="toolbar-row">
+        <label>Columns</label>
+        <input id="cols" type="number" min="10" max="200" value="80" style="width:72px" />
+        <label>Rows</label>
+        <input id="rows" type="number" min="10" max="200" value="50" style="width:72px" />
+        <button id="resizeBtn" class="secondary">Resize</button>
+      </div>
+    </div>
+
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="life"></canvas>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    // Elements
+    const canvas = document.getElementById('life');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stepBtn = document.getElementById('stepBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const speedInput = document.getElementById('speed');
+    const speedVal = document.getElementById('speedVal');
+    const cellSizeInput = document.getElementById('cellSize');
+    const cellSizeVal = document.getElementById('cellSizeVal');
+    const wrapCheckbox = document.getElementById('wrap');
+    const colsInput = document.getElementById('cols');
+    const rowsInput = document.getElementById('rows');
+    const resizeBtn = document.getElementById('resizeBtn');
+
+    // State
+    let cols = parseInt(colsInput.value, 10);
+    let rows = parseInt(rowsInput.value, 10);
+    let cellSize = parseInt(cellSizeInput.value, 10);
+    let grid = createGrid(rows, cols);
+    let running = false;
+    let timer = null;
+    let interval = parseInt(speedInput.value, 10);
+
+    // Initialize canvas size
+    function resizeCanvas() {
+      canvas.width = cols * cellSize;
+      canvas.height = rows * cellSize;
+      draw();
+    }
+
+    // Create grid rows x cols filled with 0
+    function createGrid(r, c) {
+      const g = new Array(r);
+      for (let i = 0; i < r; i++) {
+        g[i] = new Uint8Array(c); // 0 or 1
+      }
+      return g;
+    }
+
+    function clearGrid() {
+      grid = createGrid(rows, cols);
+      draw();
+    }
+
+    function randomizeGrid() {
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          grid[y][x] = Math.random() < 0.25 ? 1 : 0;
+        }
+      }
+      draw();
+    }
+
+    function countNeighbors(y, x) {
+      const wrap = wrapCheckbox.checked;
+      let total = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          let ny = y + dy;
+          let nx = x + dx;
+          if (wrap) {
+            ny = (ny + rows) % rows;
+            nx = (nx + cols) % cols;
+          } else {
+            if (ny < 0 || ny >= rows || nx < 0 || nx >= cols) continue;
+          }
+          total += grid[ny][nx];
+        }
+      }
+      return total;
+    }
+
+    function step() {
+      const next = createGrid(rows, cols);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const n = countNeighbors(y, x);
+          if (grid[y][x] === 1) {
+            next[y][x] = (n === 2 || n === 3) ? 1 : 0;
+          } else {
+            next[y][x] = (n === 3) ? 1 : 0;
+          }
+        }
+      }
+      grid = next;
+      draw();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // draw living cells
+      ctx.fillStyle = '#ffd54f';
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (grid[y][x]) {
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          }
+        }
+      }
+      // grid lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x <= cols; x++) {
+        ctx.moveTo(x * cellSize + 0.5, 0);
+        ctx.lineTo(x * cellSize + 0.5, rows * cellSize);
+      }
+      for (let y = 0; y <= rows; y++) {
+        ctx.moveTo(0, y * cellSize + 0.5);
+        ctx.lineTo(cols * cellSize, y * cellSize + 0.5);
+      }
+      ctx.stroke();
+    }
+
+    function start() {
+      if (running) return;
+      running = true;
+      startBtn.textContent = 'Stop';
+      timer = setInterval(step, interval);
+    }
+    function stop() {
+      running = false;
+      startBtn.textContent = 'Start';
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }
+    function toggleRunning() { running ? stop() : start(); }
+
+    // Interaction: toggle cell on click
+    canvas.addEventListener('click', function (ev) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = ev.clientX - rect.left;
+      const my = ev.clientY - rect.top;
+      const cx = Math.floor(mx / cellSize);
+      const cy = Math.floor(my / cellSize);
+      if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+        grid[cy][cx] = grid[cy][cx] ? 0 : 1;
+        draw();
+      }
+    });
+
+    // Controls
+    startBtn.addEventListener('click', toggleRunning);
+    stepBtn.addEventListener('click', () => { step(); });
+    clearBtn.addEventListener('click', () => { stop(); clearGrid(); });
+    randomBtn.addEventListener('click', () => { randomizeGrid(); });
+    speedInput.addEventListener('input', (e) => {
+      interval = parseInt(e.target.value, 10);
+      speedVal.textContent = interval + 'ms';
+      if (running) {
+        stop();
+        start();
+      }
+    });
+    cellSizeInput.addEventListener('input', (e) => {
+      cellSize = parseInt(e.target.value, 10);
+      cellSizeVal.textContent = cellSize + 'px';
+      resizeCanvas();
+    });
+
+    resizeBtn.addEventListener('click', () => {
+      const newCols = Math.max(10, Math.min(200, parseInt(colsInput.value, 10) || cols));
+      const newRows = Math.max(10, Math.min(200, parseInt(rowsInput.value, 10) || rows));
+      cols = newCols;
+      rows = newRows;
+      grid = createGrid(rows, cols);
+      resizeCanvas();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') { e.preventDefault(); toggleRunning(); }
+      if (e.key === 'r' || e.key === 'R') { randomizeGrid(); }
+      if (e.key === 'c' || e.key === 'C') { stop(); clearGrid(); }
+      if (e.key === 's' || e.key === 'S') { step(); }
+    });
+
+    // Initialize
+    speedVal.textContent = interval + 'ms';
+    cellSizeVal.textContent = cellSize + 'px';
+    resizeCanvas();
+    randomizeGrid();
+  })();
+  </script>
+</body>
+</html>
