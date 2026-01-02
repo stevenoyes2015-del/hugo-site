@@ -49,7 +49,7 @@
       containerEl.innerHTML = '';
       const obj = document.createElement('object');
       obj.type = 'application/pdf';
-      obj.data = url + '#page=1&zoom=100';
+      obj.data = url + '#page=1&zoom=100&toolbar=0&navpanes=0&scrollbar=0&statusbar=0&messages=0&scrollbar=0';
       obj.setAttribute('aria-label', 'PDF document');
       obj.style.width = '100%';
       obj.style.height = '100%';
@@ -69,3 +69,4 @@
 })();
 </script>
 </html>
+
