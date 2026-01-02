@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Serve PDF from site</title>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;margin:16px}
+    .pdf-wrap{width:100%;height:720px;border:1px solid #e6e6e6;border-radius:6px;overflow:auto}
+    object, iframe, embed{width:100%;height:100%;display:block}
+  </style>
+</head>
+<body>
+  <h2>Direct PDF embed (no JS required)</h2>
+
+  <!-- Place your PDF in wwwroot/pdfs/mydoc.pdf -->
+  <!-- Browser will render the PDF. Some browsers show toolbar/controls; that's native UI. -->
+  <div class="pdf-wrap" id="pdfWrap">
+    <object data="/assets/publications.pdf#page=1&zoom=100" type="application/pdf">
+      <p>Your browser does not support embedded PDFs.
+         <a href="/assets/publications.pdf" target="_blank" rel="noopener">Open the PDF in a new tab</a>.
+      </p>
+    </object>
+  </div>
+</body>
+
+<script>
+(function () {
+  'use strict';
+
+  // usage: call loadPdf('/assets/publications.pdf', document.getElementById('pdfWrap'));
+  async function loadPdf(path, containerEl) {
+    if (!path || !containerEl) return;
+    // revoke previous objectURL if present
+    const prev = containerEl.dataset.blobUrl;
+    if (prev) {
+      URL.revokeObjectURL(prev);
+      delete containerEl.dataset.blobUrl;
+    }
+
+    try {
+      const resp = await fetch(path, { method: 'GET', credentials: 'same-origin' });
+      if (!resp.ok) throw new Error('Failed to load PDF: ' + resp.status);
+      const blob = await resp.blob();
+      const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' });
+      const url = URL.createObjectURL(pdfBlob);
+
+      // insert object tag
+      containerEl.innerHTML = '';
+      const obj = document.createElement('object');
+      obj.type = 'application/pdf';
+      obj.data = url + '#page=1&zoom=100';
+      obj.setAttribute('aria-label', 'PDF document');
+      obj.style.width = '100%';
+      obj.style.height = '100%';
+      obj.innerHTML = `<p>Open <a href="${url}" target="_blank" rel="noopener">PDF</a></p>`;
+      containerEl.appendChild(obj);
+
+      // store for cleanup / download link use
+      containerEl.dataset.blobUrl = url;
+    } catch (err) {
+      containerEl.innerHTML = '<div style="padding:12px;color:#900">Unable to load PDF: ' + String(err) + '</div>';
+      console.error(err);
+    }
+  }
+
+  // Expose helper globally
+  window.loadPdf = loadPdf;
+})();
+</script>
+</html>
